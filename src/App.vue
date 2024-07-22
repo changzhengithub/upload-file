@@ -20,7 +20,10 @@
 /* eslint-disable */
 import axios from 'axios'
 
+import { uploadApi } from '@/api/upload'
+
 const CHUNK_SIZE = 2 * 1024 * 1024
+const controller = new AbortController()
 export default {
   name: 'App',
   data() {
@@ -73,7 +76,7 @@ export default {
       console.log(this.fileData)
       
       // 上传前格式大小验证
-      if (!this.handleBeforeUpload(this.fileData)) return
+      // if (!this.handleBeforeUpload(this.fileData)) return
 
       // 创建切片
       const chunkList = this.createFileChunk(this.fileData, 2)
@@ -107,7 +110,9 @@ export default {
 
     // 暂停上传
     handlePause() {
-      this.requestList.forEach(xhr => xhr?.abort())
+      // console.log(this.requestList)
+      // this.requestList.forEach(xhr => xhr?.abort())
+      controller.abort()
       this.requestList = []
     },
 
@@ -163,6 +168,7 @@ export default {
       const requestList = []
       // 过滤掉已上传的
       const filterList = this.fileList.filter(item => !uploadedList.includes(item.hash))
+      // 创建formData批量请求
       filterList.forEach((item, index) => {
         console.log('1111', item)
         // 创建formData
@@ -172,12 +178,22 @@ export default {
         formData.append('hash', item.hash)
         formData.append('filename', this.fileData.name)
 
-        const requestObj = this.request({
-          url: 'http://localhost:3003',
-          data: formData,
-          onProgress: this.createProgressHandler(index), // 计算进度条
-          requestList: this.requestList
+        const requestObj = uploadApi(formData, {
+          signal: controller.signal,
+          onUploadProgress: this.createProgressHandler(index) // 计算进度条
         })
+        // .then(res => {
+        //   console.log(res)
+        // }).catch(err => {
+        //   console.log(err)
+        // })
+
+        // const requestObj = this.request({
+        //   url: 'http://localhost:3003/upload',
+        //   data: formData,
+        //   onProgress: this.createProgressHandler(index), // 计算进度条
+        //   requestList: this.requestList
+        // })
         requestList.push(requestObj)
       })
 
