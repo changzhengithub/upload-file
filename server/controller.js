@@ -167,6 +167,9 @@ module.exports = class {
     const { fileHash, filename } = data;
     const ext = extractExt(filename);
     const filePath = path.resolve(UPLOAD_DIR, `${fileHash}${ext}`);
+    console.log('xxxx1', fse)
+    console.log('xxxx2', filePath)
+    console.log(fse.existsSync(filePath))
     if (fse.existsSync(filePath)) {
       res.end(
         JSON.stringify({

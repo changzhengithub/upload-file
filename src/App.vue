@@ -20,7 +20,7 @@
 /* eslint-disable */
 import axios from 'axios'
 
-import { uploadApi } from '@/api/upload'
+import { uploadApi, verifyApi } from '@/api/upload'
 
 const CHUNK_SIZE = 2 * 1024 * 1024
 const controller = new AbortController()
@@ -82,10 +82,11 @@ export default {
       const chunkList = this.createFileChunk(this.fileData, 2)
       console.log('切片列表', chunkList)
 
-      // 生成文件hash值
+      // 生成整个文件的hash值
       this.fileHash = await this.calculateHash(chunkList)
 
       // 判断该文件是否已上传
+      // uploadedList已上传的切片
       const { shouldUpload, uploadedList } = await this.verifyUpload(this.fileData.name, this.fileHash)
       if (!shouldUpload) {
         this.$message.success('skip upload：file upload success')
@@ -94,12 +95,13 @@ export default {
 
       // 创建上传列表
       this.fileList = chunkList.map((item, index) => {
+        const hash = `${this.fileHash}-${index}` // 根据文件hash生成切片hash
         return {
           fileHash: this.fileHash, // 唯一hash
           chunk: item.file,
-          hash: `${this.fileHash}-${index}`,
+          hash,
           size: item.file.size,
-          percentage: uploadedList.includes(index) ? 100 : 0,
+          percentage: uploadedList.includes(hash) ? 100 : 0,
           index
         }
       })
@@ -111,8 +113,8 @@ export default {
     // 暂停上传
     handlePause() {
       // console.log(this.requestList)
-      // this.requestList.forEach(xhr => xhr?.abort())
-      controller.abort()
+      this.requestList.forEach(xhr => xhr?.abort())
+      // controller.abort()
       this.requestList = []
     },
 
@@ -127,7 +129,7 @@ export default {
      * @param {File} file 文件流数据
      * @param {Number} size 切片大小默认2M
      * */
-    createFileChunk(file, size = 2) {
+    createFileChunk(file, size = CHUNK_SIZE) {
       const chunkList = []
       // 切片大小
       const chunkSize = size * 1024 * 1024
@@ -147,7 +149,7 @@ export default {
       return chunkList
     }, // 生成文件 hash（web-worker）
 
-    // 计算切片文件的md5唯一hash值
+    // 计算文件的md5唯一hash值，可以直接针对整个文件计算，不必把每个分片计算
     calculateHash(fileChunkList) {
       return new Promise(resolve => {
         // 添加 worker 属性
@@ -165,12 +167,12 @@ export default {
 
     // 批量上传切片文件
     async batchUploadChunk(uploadedList = []) {
+      console.log(uploadedList)
       const requestList = []
       // 过滤掉已上传的
       const filterList = this.fileList.filter(item => !uploadedList.includes(item.hash))
       // 创建formData批量请求
       filterList.forEach((item, index) => {
-        console.log('1111', item)
         // 创建formData
         const formData = new FormData()
         formData.append('chunk', item.chunk)
@@ -178,25 +180,25 @@ export default {
         formData.append('hash', item.hash)
         formData.append('filename', this.fileData.name)
 
-        const requestObj = uploadApi(formData, {
-          signal: controller.signal,
-          onUploadProgress: this.createProgressHandler(index) // 计算进度条
-        })
+        // const requestObj = uploadApi(formData, {
+        //   signal: controller.signal,
+        //   onUploadProgress: this.createProgressHandler(index) // 计算进度条
+        // })
         // .then(res => {
         //   console.log(res)
         // }).catch(err => {
         //   console.log(err)
         // })
 
-        // const requestObj = this.request({
-        //   url: 'http://localhost:3003/upload',
-        //   data: formData,
-        //   onProgress: this.createProgressHandler(index), // 计算进度条
-        //   requestList: this.requestList
-        // })
+        const requestObj = this.request({
+          url: 'http://localhost:3003/upload',
+          data: formData,
+          onProgress: this.createProgressHandler(index), // 计算进度条
+          requestList: this.requestList
+        })
         requestList.push(requestObj)
       })
-
+      console.log('请求列表', requestList)
       // 发送所有切片
       await Promise.allSettled(requestList)
 
