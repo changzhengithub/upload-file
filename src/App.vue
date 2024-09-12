@@ -1,31 +1,32 @@
 <template>
   <div id="app">
     <div class="app-title">大文件上传</div>
+
+    
     <div class="app-upload">
-      <el-upload action="#" :auto-upload="false" :show-file-list="false" :on-change="handleChange">
-        <div class="upload-handle">上传文件</div>
-      </el-upload>
-    </div>
-    <div class="app-progress">
-      <el-progress :percentage="fakeUploadPercentage"></el-progress>
-    </div>
-    <div class="app-operate">
-      <el-button type="primary" @click="handlePause">暂停</el-button>
-      <el-button @click="handleResume">继续上传</el-button>
+      <UploadFile></UploadFile>
     </div>
   </div>
 </template>
 
 <script>
+
+
 /* eslint-disable */
 import axios from 'axios'
 
+import UploadFile from '@/components/UploadFile'
 import { uploadApi, verifyApi } from '@/api/upload'
+
 
 const CHUNK_SIZE = 2 * 1024 * 1024
 const controller = new AbortController()
+
 export default {
   name: 'App',
+  components: {
+    UploadFile
+  },
   data() {
     return {
       fileData: null,
@@ -54,30 +55,12 @@ export default {
     }
   },
   methods: {
-    // 上传前验证
-    handleBeforeUpload(file) {
-      const { name, size } = file
-      const fileExtension = name.split('.').pop()
-      const limitTypeList = ['jpg', 'png']
-      const limitType = limitTypeList.includes(fileExtension)
-      if (!limitType) {
-        this.$message.error(`不支持${name}文件类型上传！`)
-      }
-      const limitSize = size / 1024 / 1024 < 100
-      if (!limitSize) {
-        this.$message.warning(`${name}文件不可大于 100M！`)
-      }
-      return limitType && limitSize
-    },
 
     // 上传
     async handleChange(file) {
       this.fileData = file.raw
       console.log(this.fileData)
-      
-      // 上传前格式大小验证
-      // if (!this.handleBeforeUpload(this.fileData)) return
-
+   
       // 创建切片
       const chunkList = this.createFileChunk(this.fileData, 2)
       console.log('切片列表', chunkList)
@@ -147,7 +130,7 @@ export default {
         })
       }
       return chunkList
-    }, // 生成文件 hash（web-worker）
+    },
 
     // 计算文件的md5唯一hash值，可以直接针对整个文件计算，不必把每个分片计算
     calculateHash(fileChunkList) {
@@ -298,22 +281,7 @@ export default {
 
 
 .app-title {
-  margin-bottom: 30px;
+  margin-bottom: 100px;
   font-size: 20px;
-}
-.app-upload {
-  .upload-handle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100px;
-    height: 100px;
-    border: 1px dashed #ccc;
-    border-radius: 4px;
-  }
-}
-.app-progress {
-  width: 500px;
-  margin: 0 auto;
 }
 </style>
