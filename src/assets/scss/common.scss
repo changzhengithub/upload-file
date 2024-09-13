@@ -1,0 +1,85 @@
+// 公共样式
+
+// hover效果
+.hover {
+  cursor: pointer;
+}
+
+.fr {
+  float: right;
+}
+
+.fl {
+  float: left;
+}
+
+.block {
+  display: block;
+}
+
+.clearfix {
+  &:after {
+    visibility: hidden;
+    display: block;
+    font-size: 0;
+    content: ' ';
+    clear: both;
+    height: 0;
+  }
+}
+
+
+// 内边距外边距
+@for $i from 0 through 100 {
+  .m#{$i} {
+    margin: $i + px;
+  }
+  .mt#{$i} {
+    margin-top: $i + px;
+  }
+  .mr#{$i} {
+    margin-right: $i + px;
+  }
+  .ml#{$i} {
+    margin-left: $i + px;
+  }
+  .mb#{$i} {
+    margin-bottom: $i + px;
+  }
+
+  .p#{$i} {
+    padding: $i + px;
+  }
+  .pt#{$i} {
+    padding-top: $i + px;
+  }
+  .pr#{$i} {
+    padding-right: $i + px;
+  }
+  .pb#{$i} {
+    padding-bottom: $i + px;
+  }
+  .pl#{$i} {
+    padding-left: $i + px;
+  }
+}
+
+// 文字超出部分隐藏并显示省略号 单行和多行
+@for $i from 1 through 3 {
+  .text-line-#{$i} {
+    // word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    @if $i == 1 {
+      white-space: nowrap;
+      display: block;
+    }
+
+    @else {
+      display: -webkit-box;
+      -webkit-line-clamp: #{$i};
+      line-clamp: #{$i};
+      -webkit-box-orient: vertical;
+    }
+  }
+}

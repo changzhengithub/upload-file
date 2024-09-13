@@ -38,48 +38,68 @@
       <div class="file-header" slot="title">
         <div class="header-title">
           <span>正在上传</span>
-          <span v-if="fileRequestList.length">{{`（${successFileList.length}/${fileRequestList.length}）`}}</span>
-        </div>
-        <div class="header-cancel">
-          <span @click="closeProgress">全部取消</span>
+          <span v-if="fileList.length">{{`（${successFileList.length}/${fileList.length}）`}}</span>
         </div>
       </div>
 
-      <!-- 文件列表 -->
-      <div class="file-list" v-if="fileRequestList.length">
-        <div class="list-item" v-for="(item, index) in fileRequestList" :key="index">
-          <div class="item-type">
-            <img v-if="!isImage(item.name)" src="@/assets/images/file-video.png" alt="">
-            <img v-else src="@/assets/images/file-jpg.png" alt="">
+      <div class="upload-container" v-loading="loading">
+        <!-- 上传进度 -->
+        <div class="file-wrap" v-if="fileData">
+          <div class="wrap-type">
+            <img src="@/assets/images/folder.png" alt="">
           </div>
-          <div class="item-center">
+          <div class="wrap-center">
             <div class="center-top">
-              <div class="top-name text-line-1">{{ item.file.name }}</div>
-              <div class="top-time" v-if="item.time">预估：{{ item.time | calcTime }}</div>
+              <div class="top-name text-line-1">{{ fileData.name }}</div>
+              <!-- <div class="top-time" v-if="uploadTime">预估：{{ uploadTime | calcTime }}</div> -->
             </div>
             <div class="center-progress">
-              <el-progress :percentage="item.percent" :show-text="false"></el-progress>
+              <el-progress :percentage="totalPrecent" :stroke-width="8" :show-text="false"></el-progress>
             </div>
             <div class="center-bottom">
               <div class="bottom-name">
-                <span>{{ item.loaded | formatSize }} / {{ item.file.size | formatSize}}</span>
-                <span class="ml8" v-if="item.status == 4" style="color: #FF2517;">上传失败</span>
+                <span>{{ totalLoaded | formatSize }} / {{ fileData.size | formatSize}}</span>
               </div>
               <div class="bottom-precent">
-                <span v-if="item.percent">{{ item.percent }}%</span>
+                <span v-if="totalPrecent">{{ totalPrecent }}%</span>
               </div>
             </div>
           </div>
-          <div class="item-operate">
-            <div class="operate-item" v-if="item.status == 1" @click="cancelUpload(index)">
-              <el-tooltip content="取消" placement="top">
+          <div class="wrap-operate">
+            <div class="operate-item" v-if="!hasPause && hasProgress" @click="handlePause">
+              <el-tooltip content="取消上传" placement="top">
                 <i class="el-icon-close"></i>
               </el-tooltip>
             </div>
-            <div class="operate-item" v-if="item.status == 2" @click="resetUpload(index)">
-              <el-tooltip content="重传" placement="top">
+            <!-- <div class="operate-item" v-if="hasPause" @click="handleResume">
+              <el-tooltip content="继续上传" placement="top">
                 <i class="el-icon-refresh-right"></i>
               </el-tooltip>
+            </div> -->
+          </div>
+        </div>
+  
+        <!-- 分片文件列表 -->
+        <div class="file-slice" v-if="fileList.length">
+          <div class="slice-title">分片列表</div>
+          <div class="slice-list">
+            <div class="list-item" v-for="(item, index) in fileList" :key="index">
+              <div class="item-top">
+                <div class="top-name text-line-1">{{ item.name }}</div>
+                <div class="top-time" v-if="item.time">预估：{{ item.time | calcTime }}</div>
+              </div>
+              <div class="item-progress">
+                <el-progress :percentage="item.percent" color="#e6a23" :stroke-width="4" :show-text="false"></el-progress>
+              </div>
+              <div class="item-bottom">
+                <div class="bottom-name">
+                  <span>{{ item.loaded | formatSize }} / {{ item.chunk.size | formatSize}}</span>
+                  <span class="ml8" v-if="item.status == 4" style="color: #FF2517;">上传失败</span>
+                </div>
+                <div class="bottom-precent">
+                  <span v-if="item.percent">{{ item.percent }}%</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -104,10 +124,9 @@
  * */ 
 
 /* eslint-disable */
-import { isImage } from '@/utils/util'
 
 export default {
-  name: 'UploadTosFile',
+  name: 'UploadFile',
   props: {
     // 是否在加载中，传递给父组件
     uploading: {
@@ -115,7 +134,7 @@ export default {
     },
     chunkSize: {
       type: Number,
-      default: 2
+      default: 10
     },
     maxRequestNum: {
       type: [String, Number],
@@ -155,23 +174,18 @@ export default {
   },
   data() {
     return {
-      isImage,
-      loading: false,
+      loading: false, // 加载中
       saveLoad: false,
       fileData: null,
       chunkList: [],
       fileHash: '', // 文件唯一hash
       fileList: [],
-      requestList: [], // 上传切片请求列表
+      startUploadTime: 0,
       workerInstance: null, // worker实例
-      fileHash: '', // 文件唯一hash
-      fakeUploadPercentage: 0,
 
-      fileRequestList: [], // 切片请求队列
-      
-      requestIndex: 0, // 全局索引，让第几个文件进行请求
+      // 限制上传数量
+      requestIndex: 0, // 请求指针，让第几个开始上传
       sumCount: 0, // 已请求的数量
-      reloadIndex: 0, // 重传索引
 
       progressDialog: {
         visible: false
@@ -181,19 +195,39 @@ export default {
   computed: {
     // 是否有取消上传
     hasPause() {
-      return this.fileRequestList.some(el => el.status == 2)
+      return this.fileList.some(el => el.status == 2)
     },
     // 是否有上传中
     hasProgress() {
-      return this.fileRequestList.some(el => el.status == 1)
-    },
-    // 是否有重新上传
-    hasReload() {
-      return this.fileRequestList.some(el => el.reload)
+      return this.fileList.some(el => el.status == 1)
     },
     // 已上传
     successFileList() {
-      return this.fileRequestList.filter(el => el.status == 3)
+      return this.fileList.filter(el => el.status == 3)
+    },
+    // 计算总进度
+    totalPrecent() {
+      if (!this.fileData || !this.fileList.length) return 0
+      const loaded = this.fileList.map(item => item.size * item.percent).reduce((acc, cur) => acc + cur)
+      return parseFloat((loaded / this.fileData.size).toFixed(2))
+    },
+    // 计算总上传量
+    totalLoaded() {
+      if (!this.fileData || !this.fileList.length) return 0
+      const loaded = this.fileList.map(item => item.size * item.percent / 100).reduce((acc, cur) => acc + cur)
+      return loaded
+    },
+    // 总预估时间
+    uploadTime() {
+      if (!this.fileData || !this.fileList.length) return 0
+      // 计算预估上传时间
+      // 实时计算已上传多少时间(秒)
+      const diffTime = (Date.now() - this.startUploadTime) / 1000
+      // 平均每秒上传多少文件
+      const averageSize = this.totalLoaded / diffTime
+      // 还需多少时间(秒)
+      const estimateTime = Math.floor((this.fileData.size - this.totalLoaded) / averageSize)
+      return estimateTime ? estimateTime : 0
     }
   },
   created() {},
@@ -206,9 +240,12 @@ export default {
       if (this.beforeUpload) {
         if (!this.handleBeforeUpload(this.fileData)) return
       }
+      
+      this.progressDialog.visible = true
+      this.loading = true
 
       // 创建切片
-      const chunkList = this.createFileChunk(this.fileData, 2)
+      const chunkList = this.createFileChunk(this.fileData, this.chunkSize)
       console.log('切片列表', chunkList)
 
       // 生成整个文件的hash值
@@ -218,6 +255,7 @@ export default {
       // uploadedList已上传的切片
       const { shouldUpload, uploadedList } = await this.verifyUpload(this.fileData.name, this.fileHash)
       if (!shouldUpload) {
+        this.progressDialog.visible = false
         this.$message.success('skip upload：file upload success')
         return
       }
@@ -232,6 +270,7 @@ export default {
           size: item.file.size,
           chunk: item.file,
           hash,
+          name: hash,
           index, // 当前索引
           xhr: null, // 当前请求
           status: uploaded ? 3 : 0, // 0 未上传  1上传中 2 取消上传 3 上传成功 4 上传失败
@@ -243,68 +282,149 @@ export default {
         }
       })
 
-      // 批量上传，传入已上传列表
+      
+      this.loading = false
+      // 批量上传
       this.batchUploadChunk()
     },
 
-    // 批量上传切片文件
-    async batchUploadChunk() {
-      const requestList = [] // 真实请求列表
-      // 创建formData批量请求
-      this.fileList.forEach((item, index) => {
-        if (!item.status) {
-          // 创建formData
-          const formData = new FormData()
-          formData.append('fileHash', this.fileHash)
-          formData.append('chunk', item.chunk)
-          formData.append('hash', item.hash)
-          formData.append('filename', this.fileData.name)
-          
-          const requestObj = this.uploadRequest({
+    // 限制上传数量
+    batchUploadChunk() {
+      this.startUploadTime = Date.now()
+      // 限制最大请求数量
+      for (let index = 0; index < this.maxRequestNum; index++) {
+        this.handleUploadFile()
+      }
+    },
+
+    /**
+     * @desc 上传分片文件，并限制最大请求数量
+     * 1、定义全局索引指针requestIndex来执行哪个请求，每次请求确定下一个指针是哪个
+     * 在当前请求完成后执行下一个请求，这样指针一直可以自增
+     * 2、根据同时调用几次该接口就是限制最大请求数量
+     * @author changz
+     * */ 
+     async handleUploadFile() {
+      // 向父组件传递加载中状态
+      // this.$emit('update:getUpload', true)
+
+      const index = this.requestIndex
+      // 每次请求索引自增到下一个请求
+      this.requestIndex++
+
+      const item = this.fileList[index]
+
+      // 过滤已上传
+      if (!item.status || item.status == 2) {
+        // 获取FormData
+        const formData = this.getFormData(item)
+        // 上传文件操作
+        try {
+          // 开始上传
+          this.fileList[index].status = 1
+          // 记录上传开始时间戳
+          this.fileList[index].dateNow = Date.now()
+          // 上传到抖音云
+          const res = await this.uploadRequest({
             index,
             url: 'http://localhost:3003/upload',
             data: formData
           })
-          requestList.push(requestObj)
+          console.log('上传成功', res)
+          this.fileList[index].status = 3
+        } catch (err) {
+          this.fileList[index].status = 4
+          console.log('文件上传错误', err)
         }
-      })
-      console.log('请求列表', requestList)
+      } else if (item.status == 3) {
+        // 已上传的
+        this.fileList[index].percent = 100
+        this.fileList[index].loaded = item.chunk.size
+        this.fileList[index].time = 0
+      }
+      
+      // 每次上传完成判断操作
+      if (this.hasPause) return
 
-      this.progressDialog.visible = true
-      // 发送所有切片
-      await Promise.allSettled(requestList)
-
-      // 之前上传的切片数量 + 本次上传的切片数量 = 所有切片数量时合并切片
-      if (uploadedList.length + requestList.length === this.fileList.length) {
-        // 合并切片
-        const data = await this.mergeRequest()
-        console.log('文件上传成功', data)
+      // 自动执行判断
+      this.sumCount++
+      // 边界判断，如果请求索引小于请求最大值
+      if (this.requestIndex <= this.fileList.length - 1) {
+        // 每次执行完，不论失败还是成功继续执行下一个请求
+        this.handleUploadFile()
+      } else {
+        // 判断是否上传完
+        if (this.sumCount === this.fileList.length) {
+          // 合并切片
+          const data = await this.mergeRequest()
+          console.log('文件上传成功', data)
+        }
       }
     },
 
-    // 更新某个文件的上传进度
+    getFormData(item) {
+      // 创建formData
+      const formData = new FormData()
+      formData.append('fileHash', this.fileHash)
+      formData.append('chunk', item.chunk)
+      formData.append('hash', item.hash)
+      formData.append('filename', this.fileData.name)
+      return formData
+    },
+
+    // 暂停上传
+    handlePause() {
+      this.$confirm('确定取消上传吗？', {
+        customClass: 'el-confirm-custom',
+        confirmButtonClass: 'el-confirm-custom-del',
+        cancelButtonText: '取消',
+        confirmButtonText: '确定',
+        showClose: false,
+        center: true
+      }).then(() => {
+        // 取消请求并更新状态
+        this.sumCount = 0
+        this.requestIndex = 0
+        this.fileList.forEach(item => {
+          if (item.xhr && item.status == 1) {
+            // 取消上传
+            item.xhr?.abort()
+            item.xhr = null
+            // 更新文件列表状态
+            item.reload = false
+            item.status = 2
+            item.percent = 0
+            item.loaded = 0
+            item.time = 0
+          }
+        })
+
+        this.fileList = []
+        this.progressDialog.visible = false
+      })
+    },
+
+    // 继续上传
+    handleResume() {
+      this.batchUploadChunk()
+    },
+
+    // 更新单个接口上传进度
     uploadPercentage(index) {
       return (e) => {
         // 当前上传进度
-        this.fileRequestList[index].loaded = e.loaded
+        this.fileList[index].loaded = e.loaded
         // 计算文件进度
-        this.fileRequestList[index].percent = parseFloat(((e.loaded / e.total) * 100).toFixed(2))
+        this.fileList[index].percent = parseFloat(((e.loaded / e.total) * 100).toFixed(2))
 
         // 计算预估上传时间
         // 实时计算已上传多少时间(秒)
-        const diffTime = (Date.now() - this.fileRequestList[index].dateNow) / 1000
+        const diffTime = (Date.now() - this.fileList[index].dateNow) / 1000
         // 平均每秒上传多少文件
         const averageSize = e.loaded / diffTime
         // 还需多少时间(秒)
         const estimateTime = Math.floor((e.total - e.loaded) / averageSize)
-        this.fileRequestList[index].time = estimateTime
-      }
-    },
-
-    // 单个接口上传进度
-    createProgressHandler(index) {
-      return e => {
-        this.fileList[index].percentage = parseInt(String((e.loaded / e.total) * 100))
+        this.fileList[index].time = estimateTime
       }
     },
 
@@ -344,7 +464,7 @@ export default {
      * @param {File} file 文件流数据
      * @param {Number} size 切片大小默认2M
      * */
-    createFileChunk(file, size = this.chunkSize) {
+    createFileChunk(file, size = 2) {
       const chunkList = []
       // 切片大小
       const chunkSize = size * 1024 * 1024
@@ -381,11 +501,7 @@ export default {
     },
 
     // 文件上传接口封装
-    uploadRequest(index, url, method = 'post', data, headers = {}) {
-      // 记录上传开始时间戳
-      this.fileList[index].dateNow = Date.now()
-      // 开始上传
-      this.fileList[index].status = 1
+    uploadRequest({ index, url, method = 'post', data, headers = {} }) {
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         xhr.upload.onprogress = this.uploadPercentage(index)
@@ -393,8 +509,6 @@ export default {
         Object.keys(headers).forEach(key => xhr.setRequestHeader(key, headers[key]))
         xhr.send(data)
         xhr.onload = e => {
-          // 上传完成
-          this.fileList[index].status = 3
           resolve({
             data: e.target.response
           })
@@ -422,192 +536,6 @@ export default {
       })
     },
 
-
-    // 获取上传文件内容
-    handleUploadChange(elFile) {
-      const file = elFile.raw
-      console.log('文件对象', file)
-      // 上传前格式大小验证
-      if (this.beforeUpload) {
-        if (!this.handleBeforeUpload(file)) return
-      }
-
-      const index = this.fileRequestList.length
-      const type = file.name.split('.').pop() // 文件类型
-      // 添加到文件列表
-      const obj = {
-        index,
-        file,
-        name: file.name,
-        type, // 文件类型
-        xhr: null, // 当前请求
-        status: 0, // 0 未上传  1上传中 2 取消上传 3 上传成功 4 上传失败
-        reload: false, // 是否是重新上传
-        percent: 0, // 上传进度
-        loaded: 0, // 已上送大小（字节）
-        dateNow: 0, // 记录上传时间
-        time: 0, // 预估上传时间
-        // 创建素材时存储的对应地址，告诉后端存储到哪目录
-        filePath: this.dyTosPath ? `${this.dyTosPath}${file.name}` : file.name,
-        // 上传图片时后端返回的抖音存储地址，在上传图片时用来获取图片
-        tosPath: ''
-      }
-      this.fileRequestList.push(obj)
-
-      // 限制最大请求数量，根据已请求数量和未完成的数量计算出正在请求数量，来判断再次上传是否需要再执行handleUploadFile
-      // 正在请求数量，一旦发请求，全局索引会自增
-      const requestNum =  this.requestIndex - this.sumCount
-      // 如果最大请求数量大于正在请求数量，说明可以继续上传
-      if (this.maxRequestNum > requestNum) {
-        this.handleUploadTosFile()
-      }
-
-      // 是否打开进度条
-      if (this.progressDialog.visible || !this.progress) return
-      this.progressDialog.visible = true
-    },
-
-    /**
-     * @desc 上传TOS文件，并限制最大请求数量
-     * @param {*} flag 是否是重传文件
-     * 1、定义全局索引指针requestIndex来执行哪个请求，每次请求确定下一个指针是哪个
-     * 在当前请求完成后执行下一个请求，这样指针一直可以自增
-     * 2、根据同时调用几次该接口就是限制最大请求数量
-     * @author changz
-     * */ 
-    async handleUploadTosFile(flag) {
-      // 向父组件传递加载中状态
-      this.$emit('update:getUpload', true)
-      let index = this.requestIndex
-      if (flag) {
-        index = this.reloadIndex
-      } else {
-        // 每次请求索引自增到下一个请求
-        this.requestIndex++
-      }
-      
-      const { file, filePath, sceneCode } = this.fileRequestList[index]
-
-      // 上传文件操作
-      // try {
-      //   // 调用后端接口获取抖音TOS上传地址
-      //   const signRes = await preSignedUploadUrlApi({
-      //     sceneCode,
-      //     path: filePath
-      //   })
-      //   console.log('上传地址结果', signRes)
-      //   const { uploadUrl, tosPath } = signRes.data
-      //   this.fileRequestList[index].tosPath = tosPath
-      //   // 转成二进制流上传到抖音云
-      //   const binaryData = await this.readArrayBuffer(file)
-      //   this.fileRequestList[index].status = 1
-      //   // 上传到抖音云
-      //   const tosResq = await this.tosRequest(index, uploadUrl, binaryData)
-      //   console.log('上传抖音云成功', tosResq)
-      //   this.fileRequestList[index].status = 3
-      //   // 提交事件
-      //   this.$emit('change', this.fileRequestList[index])
-
-      // } catch (err) {
-      //   this.fileRequestList[index].status = 4
-      //   console.log('文件上传错误', err)
-      // } finally {
-      //   // 每次上传完成判断操作
-      //   if (flag) {
-      //     // 关闭重传判断
-      //     this.fileRequestList[index].reload = false
-      //   } else {
-      //     // 自动执行判断
-      //     this.sumCount++
-      //     // 边界判断，如果请求索引小于请求最大值
-      //     if (this.requestIndex <= this.fileRequestList.length - 1) {
-      //       // 每次执行完，不论失败还是成功继续执行下一个请求
-      //       this.handleUploadTosFile()
-      //     } else {
-      //       // 全上传完且没有重传就关闭进度条，清空弹窗
-      //       if (!this.hasPause) {
-      //         this.clearFileList()
-      //         // 向父组件传递加载中状态
-      //         this.$emit('update:getUpload', false)
-      //       }
-      //     }
-      //   }
-      // }
-    },
-
-    // 把File转成二进制流
-    readArrayBuffer(file) {
-      return new Promise((resolve) => {
-        // 转成二进制流上传到抖音云
-        const fileReader = new FileReader()
-        fileReader.readAsArrayBuffer(file)
-        // 读取完成时的回调
-        fileReader.onload = (event) => {
-          // 转换为二进制流
-          const binaryData = event.target.result
-          resolve(binaryData)
-        }
-      })
-    },
-
-    // 上传到抖音云
-    tosRequest(index, url, data, headers = {}) {
-      // 记录上传开始时间戳
-      this.fileRequestList[index].dateNow = Date.now()
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        xhr.upload.onprogress = this.uploadPercentage(index)
-        xhr.open('PUT', url)
-        Object.keys(headers).forEach(key => xhr.setRequestHeader(key, headers[key]))
-        xhr.send(data)
-        xhr.onload = e => {
-          resolve({
-            data: e.target.response
-          })
-        }
-        xhr.onerror = (err) => {
-          reject(err)
-        }
-        // 暴露当前 xhr 用于取消请求
-        this.fileRequestList[index].xhr = xhr
-      })
-    },
-
-    // 取消上传
-    async cancelUpload(index) {
-      if (this.fileRequestList[index].status !== 1) return
-      // 取消上传
-      this.fileRequestList[index].xhr?.abort()
-      this.fileRequestList[index].xhr = null
-      // 更新文件列表状态
-      this.fileRequestList[index].reload = false
-      this.fileRequestList[index].status = 2
-      this.fileRequestList[index].percent = 0
-      this.fileRequestList[index].loaded = 0
-      this.fileRequestList[index].time = 0
-
-      // 取消后继续执行下一个请求
-      if (this.requestIndex <= this.fileRequestList.length - 1) {
-        // 判断没有正在请求的就继续请求
-        if (!this.hasProgress) this.handleUploadTosFile()
-      }
-    },
-    
-    // 重新上传
-    resetUpload(index) {
-      // 有正在重新上传的
-      if (this.hasReload) return
-      this.fileRequestList[index].reload = true
-      this.fileRequestList[index].status = 0
-      this.fileRequestList[index].xhr = null
-      this.fileRequestList[index].percent = 0
-      this.fileRequestList[index].loaded = 0
-      this.fileRequestList[index].time = 0
-      this.reloadIndex = index
-      // 重传
-      this.handleUploadTosFile(true)
-    },
-
     // 上传前验证
     handleBeforeUpload(file) {
       console.log(file)
@@ -627,39 +555,7 @@ export default {
         // return false
       }
       return limitType && limitSize
-    },
-
-    // 手动关闭进度条
-    closeProgress() {
-      this.$confirm('确定取消全部上传吗？', {
-        customClass: 'el-confirm-custom',
-        confirmButtonClass: 'el-confirm-custom-del',
-        cancelButtonText: '取消',
-        confirmButtonText: '确定',
-        showClose: false,
-        center: true
-      }).then(() => {
-        this.fileRequestList.forEach(item => {
-          if (item.xhr) item.xhr?.abort()
-        })
-        this.closeDialog()
-      })
-    },
-
-    // 关闭弹窗
-    closeDialog() {
-      this.clearFileList()
-      this.$emit('close')
-    },
-
-    clearFileList() {
-      this.progressDialog.visible = false
-      this.fileRequestList  = []
-      this.reloadIndex = 0
-      this.sumCount = 0
-      this.requestIndex = 0
     }
-
   }
 }
 </script>
@@ -703,17 +599,14 @@ export default {
   }
 }
 
-// 进度条列表
-.file-list {
+.upload-container {
   width: 100%;
-  margin-bottom: 15px;
-  .list-item {
+  .file-wrap {
     display: flex;
     align-items: center;
     width: 100%;
-    height: 56px;
-    padding: 0 10px;
-    .item-type {
+    margin-bottom: 20px;
+    .wrap-type {
       width: 28px;
       height: 28px;
       margin-right: 10px;
@@ -723,7 +616,7 @@ export default {
         height: 100%;
       }
     }
-    .item-center {
+    .wrap-center {
       flex: 1;
       font-size: 12px;
       color: #333;
@@ -750,7 +643,7 @@ export default {
         width: 100%;
       }
     }
-    .item-operate {
+    .wrap-operate {
       display: flex;
       justify-content: flex-end;
       width: 38px;
@@ -769,9 +662,52 @@ export default {
         cursor: pointer;
       }
     }
-    // &:hover {
-    //   background-color: rgba(45, 80, 238, 0.06);
-    // }
+  }
+  
+  // 进度条列表
+  .file-slice {
+    width: 100%;
+    padding: 0 30px;
+    margin-bottom: 15px;
+    .slice-title {
+      width: 100%;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .slice-list {
+      width: 100%;
+      max-height: 400px;
+      overflow-y: auto;
+      .list-item {
+        width: 100%;
+        padding: 0 15px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: #333;
+        .item-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          margin-bottom: 5px;
+          font-size: 12px;
+          color: #333;
+          .top-name {
+            max-width: 300px;
+          }
+        }
+        .item-progress {
+          width: 100%;
+          margin-bottom: 5px;
+        }
+        .item-bottom {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+        }
+      }
+    }
   }
 }
 </style>
