@@ -274,7 +274,6 @@ export default {
           index, // 当前索引
           xhr: null, // 当前请求
           status: uploaded ? 3 : 0, // 0 未上传  1上传中 2 取消上传 3 上传成功 4 上传失败
-          reload: false, // 是否是重新上传
           percent: uploaded ? 100 : 0, // 上传进度
           loaded: 0, // 已上送大小（字节）
           dateNow: 0, // 记录上传时间
@@ -324,7 +323,7 @@ export default {
           this.fileList[index].status = 1
           // 记录上传开始时间戳
           this.fileList[index].dateNow = Date.now()
-          // 上传到抖音云
+          // 上传
           const res = await this.uploadRequest({
             index,
             url: 'http://localhost:3003/upload',
@@ -391,7 +390,6 @@ export default {
             item.xhr?.abort()
             item.xhr = null
             // 更新文件列表状态
-            item.reload = false
             item.status = 2
             item.percent = 0
             item.loaded = 0
